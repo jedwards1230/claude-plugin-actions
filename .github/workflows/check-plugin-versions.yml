@@ -5,8 +5,9 @@
 # repos) so the check logic and bundled script live in one place rather than
 # being duplicated per repo.
 #
-# Caller pins a ref (e.g. @v0) and this workflow self-checks-out the same ref
-# of claude-plugin-actions so the workflow YAML and the bundled script never drift.
+# Caller pins a ref (e.g. @v0) and this workflow self-checks-out the exact
+# commit SHA of THIS workflow file (via github.job_workflow_sha) so the
+# workflow YAML and the bundled script never drift.
 name: Plugin Version Check
 
 on:
@@ -47,24 +48,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve workflow ref
-        id: workflow-ref
-        env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-        run: |
-          # github.workflow_ref format: <owner>/<repo>/.github/workflows/<file>.yml@<ref>
-          # where <ref> is refs/heads/<branch>, refs/tags/<tag>, or a commit SHA.
-          REF="${WORKFLOW_REF##*@}"
-          REF="${REF#refs/heads/}"
-          REF="${REF#refs/tags/}"
-          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-          echo "Using claude-plugin-actions@${REF}"
-
       - name: Checkout claude-plugin-actions scripts
+        # github.job_workflow_sha is the exact commit SHA of THIS reusable
+        # workflow file. github.workflow_ref points at the CALLER's workflow,
+        # so we can't use it to self-checkout. SHA pinning also guarantees
+        # bit-for-bit consistency between the workflow YAML and the script.
         uses: actions/checkout@v4
         with:
           repository: jedwards1230/claude-plugin-actions
-          ref: ${{ steps.workflow-ref.outputs.ref }}
+          ref: ${{ github.job_workflow_sha }}
           path: .claude-plugin-actions
           fetch-depth: 1
 

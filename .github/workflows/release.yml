@@ -159,7 +159,7 @@ jobs:
             PREV_DATE=$(git log -1 --format=%cI "$CURRENT")
             PR_LIST=$(gh pr list --state merged --base main --limit 50 \
               --json number,title,mergedAt,author \
-              --jq --arg d "$PREV_DATE" \
+              | jq -r --arg d "$PREV_DATE" \
                 '.[] | select(.mergedAt > $d) | "- #\(.number) \(.title) (@\(.author.login))"')
           fi
 

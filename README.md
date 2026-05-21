@@ -1,6 +1,7 @@
 # claude-plugin-actions
 
 ![Version](https://img.shields.io/github/v/release/jedwards1230/claude-plugin-actions?style=flat-square&color=blue)
+![CI](https://img.shields.io/github/actions/workflow/status/jedwards1230/claude-plugin-actions/ci.yml?branch=main&style=flat-square&label=ci)
 ![License](https://img.shields.io/github/license/jedwards1230/claude-plugin-actions?style=flat-square)
 
 Reusable GitHub Actions workflows for [Claude Code plugin marketplaces](https://code.claude.com/docs/en/plugin-marketplaces).
@@ -71,6 +72,20 @@ bash /tmp/claude-plugin-actions/scripts/check-plugin-versions.sh origin/main
 | Pinned minor | `@v0.1` | Gets patch fixes only |
 | Pinned patch | `@v0.1.0` | Exact version, no auto-updates |
 | Latest unstable | `@main` | Bleeding edge |
+
+Moving tags (`v0`, `v0.1`) are fast-forwarded automatically by the release workflow on every release.
+
+## Tested against
+
+Real-world consumers of this workflow:
+
+- [`jedwards1230/claude-plugins`](https://github.com/jedwards1230/claude-plugins)
+- [`jedwards1230/claude-plugins-private`](https://github.com/jedwards1230/claude-plugins-private)
+- [`jedwards1230/deck`](https://github.com/jedwards1230/deck)
+
+## Contributing
+
+PRs welcome. Releases are opt-in via a `semver:patch`, `semver:minor`, or `semver:major` label on the merged PR — see [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
 ## License
 

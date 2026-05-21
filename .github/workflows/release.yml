@@ -1,0 +1,178 @@
+# Auto-release on push to main when a merged PR carries a semver:* label.
+# Delegates tag + GH release creation (and moving v0 / v0.1 tag fast-forward)
+# to the shared jedwards1230/release-workflows/.github/workflows/generic-release.yml.
+# Opt-in: PRs without a semver:* label produce no release.
+
+name: Release
+
+run-name: >-
+  ${{
+    github.event_name == 'workflow_dispatch'
+      && format('Release: {0}{1}', inputs.dry_run && 'dry-run ' || '', inputs.bump_type)
+      || format('Release: {0}', github.event.head_commit.message || github.sha)
+  }}
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      dry_run:
+        description: "Dry run — compute version without tagging or publishing"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  detect:
+    name: Detect bump type
+    runs-on: ubuntu-latest
+    outputs:
+      bump_type: ${{ steps.bump.outputs.type }}
+      dry_run: ${{ steps.bump.outputs.dry_run }}
+      skip: ${{ steps.bump.outputs.skip }}
+    steps:
+      - id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # workflow_dispatch: inputs are authoritative.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "type=${{ inputs.bump_type }}" >> "$GITHUB_OUTPUT"
+            echo "dry_run=${{ inputs.dry_run }}" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # push event: opt-in via semver:* label. Retry up to 3 times because
+          # the merge commit may not be indexed immediately after push.
+          LABELS=""
+          for attempt in 1 2 3; do
+            LABELS=$(gh pr list --state merged --base main --limit 100 \
+              --json labels,mergeCommit \
+              | jq -r --arg sha "$GITHUB_SHA" \
+                '.[] | select(.mergeCommit.oid == $sha) | .labels[].name' 2>/dev/null || echo "")
+            [ -n "$LABELS" ] && break
+            echo "Attempt ${attempt}: no labels for ${GITHUB_SHA}, retrying in 5s..."
+            sleep 5
+          done
+
+          echo "Labels: ${LABELS:-<none>}"
+
+          if echo "$LABELS" | grep -q '^semver:major$'; then
+            echo "type=major" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q '^semver:minor$'; then
+            echo "type=minor" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q '^semver:patch$'; then
+            echo "type=patch" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No semver:* label on merge commit — skipping release"
+            echo "type=patch" >> "$GITHUB_OUTPUT"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "dry_run=false" >> "$GITHUB_OUTPUT"
+
+  prepare:
+    name: Compute version & changelog
+    needs: detect
+    if: needs.detect.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.version.outputs.new_version }}
+      current_version: ${{ steps.version.outputs.current_version }}
+      changelog_content: ${{ steps.changelog.outputs.content }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: version
+        env:
+          BUMP: ${{ needs.detect.outputs.bump_type }}
+        run: |
+          # Latest immutable vX.Y.Z tag (excludes moving v0 / v0.1).
+          CURRENT=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          CURRENT=${CURRENT:-v0.0.0}
+          VERSION_NUMBERS=${CURRENT#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NUMBERS"
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+          NEW="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "current_version=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "new_version=$NEW" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Version"
+            echo "- Current: $CURRENT"
+            echo "- Next: $NEW (bump: $BUMP)"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - id: changelog
+        env:
+          CURRENT: ${{ steps.version.outputs.current_version }}
+          NEW: ${{ steps.version.outputs.new_version }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Collect merged-PR list since the previous tag's commit date
+          # (strict > so the previously-released PR isn't double-counted).
+          if [ "$CURRENT" = "v0.0.0" ]; then
+            PR_LIST=$(gh pr list --state merged --base main --limit 50 \
+              --json number,title,author \
+              --jq '.[] | "- #\(.number) \(.title) (@\(.author.login))"')
+          else
+            PREV_DATE=$(git log -1 --format=%cI "$CURRENT")
+            PR_LIST=$(gh pr list --state merged --base main --limit 50 \
+              --json number,title,mergedAt,author \
+              --jq --arg d "$PREV_DATE" \
+                '.[] | select(.mergedAt > $d) | "- #\(.number) \(.title) (@\(.author.login))"')
+          fi
+
+          {
+            echo "## What's Changed"
+            echo
+            if [ -n "$PR_LIST" ]; then
+              echo "$PR_LIST"
+            else
+              echo "_No merged PRs since ${CURRENT}._"
+            fi
+            echo
+            echo "**Full Changelog**: https://github.com/${GH_REPO}/compare/${CURRENT}...${NEW}"
+          } > /tmp/changelog.md
+
+          {
+            echo "content<<CHANGELOG_EOF"
+            cat /tmp/changelog.md
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          cat /tmp/changelog.md >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Tag & publish
+    needs: [detect, prepare]
+    if: needs.detect.outputs.dry_run != 'true' && needs.detect.outputs.skip != 'true'
+    uses: jedwards1230/release-workflows/.github/workflows/generic-release.yml@v0
+    with:
+      new_version: ${{ needs.prepare.outputs.new_version }}
+      current_version: ${{ needs.prepare.outputs.current_version }}
+      changelog_content: ${{ needs.prepare.outputs.changelog_content }}
+      create_release: true

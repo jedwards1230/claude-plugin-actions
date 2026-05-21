@@ -1,0 +1,91 @@
+# Validates the bundled script (the consumer contract) on every push and PR.
+# Runs shellcheck and a smoke test that exercises the version-bump check
+# against a tiny fixture repo with both passing and failing cases.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: scripts
+
+  smoke-test:
+    name: Script smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: action
+      - name: Build fixture and exercise script
+        run: |
+          set -euo pipefail
+          SCRIPT="$GITHUB_WORKSPACE/action/scripts/check-plugin-versions.sh"
+
+          TMP=$(mktemp -d)
+          cd "$TMP"
+          git init -q -b main
+          git config user.email ci@test
+          git config user.name ci
+
+          mkdir -p .claude-plugin plugins/foo/.claude-plugin
+
+          cat > .claude-plugin/marketplace.json <<'JSON'
+          {
+            "name": "test",
+            "owner": {"name": "test"},
+            "metadata": {"version": "1.0.0"},
+            "plugins": [
+              {"name": "foo", "source": "./plugins/foo", "description": "test"}
+            ]
+          }
+          JSON
+
+          cat > plugins/foo/.claude-plugin/plugin.json <<'JSON'
+          {"name": "foo", "version": "0.1.0", "description": "test"}
+          JSON
+
+          git add -A && git commit -q -m "initial"
+
+          # Case 1: plugin file changed but version NOT bumped → expect FAIL
+          echo "  " >> plugins/foo/.claude-plugin/plugin.json
+          git add -A && git commit -q -m "change without bump"
+          if "$SCRIPT" HEAD~1; then
+            echo "::error::Script should have rejected unchanged version"
+            exit 1
+          fi
+          echo "PASS Case 1: rejected missing version bump"
+
+          # Case 2: both plugin version AND marketplace.metadata.version bumped → expect PASS
+          jq '.version = "0.1.1"' plugins/foo/.claude-plugin/plugin.json > /tmp/p
+          mv /tmp/p plugins/foo/.claude-plugin/plugin.json
+          jq '.metadata.version = "1.0.1"' .claude-plugin/marketplace.json > /tmp/m
+          mv /tmp/m .claude-plugin/marketplace.json
+          git add -A && git commit -q -m "bump versions"
+          if ! "$SCRIPT" HEAD~1; then
+            echo "::error::Script should have accepted proper bumps"
+            exit 1
+          fi
+          echo "PASS Case 2: accepted proper version bump"
+
+          # Case 3: no plugin changes → expect PASS (no-op)
+          echo "# unrelated" >> README-test.md
+          git add -A && git commit -q -m "unrelated change"
+          if ! "$SCRIPT" HEAD~1; then
+            echo "::error::Script should accept commits with no plugin changes"
+            exit 1
+          fi
+          echo "PASS Case 3: accepted commit with no plugin changes"

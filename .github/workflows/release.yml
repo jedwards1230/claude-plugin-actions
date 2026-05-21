@@ -98,6 +98,7 @@ jobs:
     outputs:
       new_version: ${{ steps.version.outputs.new_version }}
       current_version: ${{ steps.version.outputs.current_version }}
+      is_first: ${{ steps.version.outputs.is_first }}
       changelog_content: ${{ steps.changelog.outputs.content }}
     steps:
       - uses: actions/checkout@v6
@@ -107,9 +108,18 @@ jobs:
         env:
           BUMP: ${{ needs.detect.outputs.bump_type }}
         run: |
-          # Latest immutable vX.Y.Z tag (excludes moving v0 / v0.1).
-          CURRENT=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
-          CURRENT=${CURRENT:-v0.0.0}
+          # Latest immutable vX.Y.Z tag (excludes moving v0 / v0.1). On the
+          # first release no such tag exists yet, so we bump from v0.0.0 but
+          # mark is_first=true so the changelog step can skip the compare link
+          # (which would 404 — there's no v0.0.0 ref to compare against).
+          CURRENT_RAW=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          if [ -z "$CURRENT_RAW" ]; then
+            IS_FIRST=true
+            CURRENT=v0.0.0
+          else
+            IS_FIRST=false
+            CURRENT="$CURRENT_RAW"
+          fi
           VERSION_NUMBERS=${CURRENT#v}
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NUMBERS"
           case "$BUMP" in
@@ -120,21 +130,27 @@ jobs:
           NEW="v${MAJOR}.${MINOR}.${PATCH}"
           echo "current_version=$CURRENT" >> "$GITHUB_OUTPUT"
           echo "new_version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "is_first=$IS_FIRST" >> "$GITHUB_OUTPUT"
           {
             echo "## Version"
-            echo "- Current: $CURRENT"
+            if [ "$IS_FIRST" = "true" ]; then
+              echo "- Current: $CURRENT (no prior tags — first release)"
+            else
+              echo "- Current: $CURRENT"
+            fi
             echo "- Next: $NEW (bump: $BUMP)"
           } >> "$GITHUB_STEP_SUMMARY"
       - id: changelog
         env:
           CURRENT: ${{ steps.version.outputs.current_version }}
           NEW: ${{ steps.version.outputs.new_version }}
+          IS_FIRST: ${{ steps.version.outputs.is_first }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          # Collect merged-PR list since the previous tag's commit date
-          # (strict > so the previously-released PR isn't double-counted).
-          if [ "$CURRENT" = "v0.0.0" ]; then
+          # Collect merged-PR list. On first release, list everything; otherwise
+          # restrict to PRs merged strictly after the previous tag's commit date.
+          if [ "$IS_FIRST" = "true" ]; then
             PR_LIST=$(gh pr list --state merged --base main --limit 50 \
               --json number,title,author \
               --jq '.[] | "- #\(.number) \(.title) (@\(.author.login))"')
@@ -152,10 +168,14 @@ jobs:
             if [ -n "$PR_LIST" ]; then
               echo "$PR_LIST"
             else
-              echo "_No merged PRs since ${CURRENT}._"
+              echo "_No merged PRs found._"
             fi
             echo
-            echo "**Full Changelog**: https://github.com/${GH_REPO}/compare/${CURRENT}...${NEW}"
+            if [ "$IS_FIRST" = "true" ]; then
+              echo "_First release — no prior version to compare._"
+            else
+              echo "**Full Changelog**: https://github.com/${GH_REPO}/compare/${CURRENT}...${NEW}"
+            fi
           } > /tmp/changelog.md
 
           {

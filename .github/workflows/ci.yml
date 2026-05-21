@@ -4,6 +4,11 @@
 
 name: CI
 
+run-name: >-
+  ${{ github.event_name == 'pull_request'
+        && format('CI: PR #{0}', github.event.pull_request.number)
+        || format('CI: {0}', github.event.head_commit.message || github.sha) }}
+
 on:
   push:
     branches: [main]
@@ -19,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: ludeeus/action-shellcheck@master
+      - uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # v2.0.0
         with:
           scandir: scripts
 

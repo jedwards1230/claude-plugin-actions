@@ -1,7 +1,8 @@
 # Auto-release on push to main when a merged PR carries a semver:* label.
-# Delegates tag + GH release creation (and moving v0 / v0.1 tag fast-forward)
-# to the shared jedwards1230/release-workflows/.github/workflows/generic-release.yml.
-# Opt-in: PRs without a semver:* label produce no release.
+# Computes the next version from the latest immutable vX.Y.Z tag, builds a
+# changelog from PRs merged since that tag, creates the version tag, then
+# fast-forwards the moving v0 / v0.1 tags so consumers pinning @v0 or @v0.1
+# track the latest release. Opt-in: PRs without a semver:* label do nothing.
 
 name: Release
 
@@ -190,9 +191,41 @@ jobs:
     name: Tag & publish
     needs: [detect, prepare]
     if: needs.detect.outputs.dry_run != 'true' && needs.detect.outputs.skip != 'true'
-    uses: jedwards1230/release-workflows/.github/workflows/generic-release.yml@v0
-    with:
-      new_version: ${{ needs.prepare.outputs.new_version }}
-      current_version: ${{ needs.prepare.outputs.current_version }}
-      changelog_content: ${{ needs.prepare.outputs.changelog_content }}
-      create_release: true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Create and push tags
+        env:
+          NEW: ${{ needs.prepare.outputs.new_version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Immutable specific-version tag.
+          git tag -a "$NEW" -m "Release $NEW"
+          git push origin "$NEW"
+
+          # Fast-forward moving major/minor tags so @v0 and @v0.1 pins stay current.
+          IFS='.' read -r MAJOR MINOR _ <<< "${NEW#v}"
+          for t in "v${MAJOR}" "v${MAJOR}.${MINOR}"; do
+            git tag -f -a "$t" -m "Latest ${t}.x release: $NEW"
+            git push -f origin "$t"
+          done
+
+          {
+            echo "## Tags"
+            echo "- $NEW (immutable)"
+            echo "- v${MAJOR} (moving)"
+            echo "- v${MAJOR}.${MINOR} (moving)"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.prepare.outputs.new_version }}
+          name: Release ${{ needs.prepare.outputs.new_version }}
+          body: ${{ needs.prepare.outputs.changelog_content }}
+          make_latest: "true"

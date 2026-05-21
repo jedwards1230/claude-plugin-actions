@@ -205,9 +205,20 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Immutable specific-version tag.
-          git tag -a "$NEW" -m "Release $NEW"
-          git push origin "$NEW"
+          # Immutable specific-version tag. Idempotent on retry: if the tag
+          # already exists and points at the current commit, no-op; if it points
+          # elsewhere, fail loudly (a real version conflict).
+          if existing=$(git rev-parse -q --verify "refs/tags/$NEW"); then
+            if [ "$existing" = "$GITHUB_SHA" ]; then
+              echo "Tag $NEW already at $GITHUB_SHA — skipping create."
+            else
+              echo "::error::Tag $NEW already exists at $existing (HEAD is $GITHUB_SHA)"
+              exit 1
+            fi
+          else
+            git tag -a "$NEW" -m "Release $NEW"
+            git push origin "$NEW"
+          fi
 
           # Fast-forward moving major/minor tags so @v0 and @v0.1 pins stay current.
           IFS='.' read -r MAJOR MINOR _ <<< "${NEW#v}"

@@ -1,0 +1,14 @@
+# Keep action versions in workflows up-to-date. Reusable workflows are pulled
+# in via uses: jedwards1230/release-workflows/...@v0 (moving major tag) so
+# those track upstream automatically; dependabot only updates direct action
+# pins like actions/checkout, softprops/action-gh-release, etc.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

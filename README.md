@@ -80,7 +80,7 @@ Moving tags (`v0`, `v0.1`) are fast-forwarded automatically by the release workf
 Real-world consumers of this workflow:
 
 - [`jedwards1230/claude-plugins`](https://github.com/jedwards1230/claude-plugins)
-- [`jedwards1230/claude-plugins-private`](https://github.com/jedwards1230/claude-plugins-private)
+- also validated against private marketplace repos
 - [`jedwards1230/deck`](https://github.com/jedwards1230/deck)
 
 ## Contributing

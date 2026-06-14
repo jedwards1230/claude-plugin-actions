@@ -1,0 +1,68 @@
+# Claude PR review — calls the shared reusable workflow in
+# jedwards1230/release-workflows, which runs claude-code-action@v1 in Haiku
+# PR-review mode with the public jedwards1230-plugins marketplace + review-team
+# plugin enabled by default. The focus below is appended to the base prompt.
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  review:
+    uses: jedwards1230/release-workflows/.github/workflows/claude-pr-review.yml@v1
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    with:
+      focus: |
+        This repo ships a reusable GitHub Actions workflow (`check-plugin-versions.yml`)
+        and a companion bash script (`scripts/check-plugin-versions.sh`) that enforce
+        Claude Code plugin marketplace version hygiene for consuming repos.
+
+        Focus your review on:
+
+        **Bash script correctness (`scripts/check-plugin-versions.sh`)**
+        - Version comparison logic: does `==` string equality correctly detect an unchanged
+          semver, or are there edge cases (leading zeros, whitespace, empty string) where
+          it gives a false pass or false fail?
+        - `get_changed_plugins`: the three-dot diff (`base...HEAD`) vs two-dot diff —
+          is it correct for PR contexts where HEAD is the merge-commit preview?
+        - `jq` expressions: `.plugins[]?`, `select(has("version"))`, `.version // empty` —
+          are these resilient to malformed/missing JSON fields, or can they silently
+          swallow errors?
+        - `comm` usage in the PR-comment step of the workflow: `comm` requires sorted
+          input — verify both sides are guaranteed sorted before the pipe.
+        - Exit-code propagation: `set -euo pipefail` is set, but several calls use
+          `|| true` to suppress failures. Flag any place where a real error is silently
+          swallowed vs where suppression is intentional.
+        - New-plugin detection (`is_new_plugin`): if `get_plugin_version` returns empty
+          because the file is absent vs because `.version` is genuinely missing from
+          plugin.json, the distinction is lost — is that a problem?
+        - `ERRORS_FOUND` is a plain integer incremented inside functions; bash subshell
+          gotcha: increments inside `$(...)` or pipes won't propagate back — check all
+          call sites.
+
+        **Workflow YAML correctness (`.github/workflows/check-plugin-versions.yml`)**
+        - The `github.job_workflow_sha` self-checkout trick: verify the expression is
+          correct and will resolve to the reusable workflow's commit, not the caller's.
+        - `if: always() && ...` guard on the PR-comment step — does `always()` interact
+          correctly with a prior step's failure to ensure the comment still posts?
+        - The `gh api` comment-deletion loop: does piping into `while read` inside a
+          step that sets `GH_TOKEN` work as expected, or are there quoting/env-scope
+          issues?
+
+        **False-positive / false-negative risks**
+        - A PR that only changes workflow YAML (not plugin files) but also touches
+          `marketplace.json` — does the script correctly require a metadata bump?
+        - A PR that removes a plugin entirely — does `validate_plugin` correctly skip
+          rather than fail when `head_plugin_version` is empty?
+        - A newly added plugin with no prior version in base — does `is_new_plugin`
+          skip the bump requirement correctly?
+
+        Do NOT re-flag shellcheck findings — CI lints already own those.

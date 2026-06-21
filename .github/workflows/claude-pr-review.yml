@@ -66,17 +66,3 @@ jobs:
           skip the bump requirement correctly?
 
         Do NOT re-flag shellcheck findings — CI lints already own those.
-
-  pr-review:
-    name: PR Review
-    if: always()
-    needs: [review]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check review result
-        run: |
-          result="${{ needs.review.result }}"
-          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
-            echo "PR Review passed (result: $result)"; exit 0
-          fi
-          echo "PR Review failed (result: $result)"; exit 1

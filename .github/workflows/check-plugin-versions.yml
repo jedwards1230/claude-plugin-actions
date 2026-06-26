@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout consuming repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
@@ -53,7 +53,7 @@ jobs:
         # workflow file. github.workflow_ref points at the CALLER's workflow,
         # so we can't use it to self-checkout. SHA pinning also guarantees
         # bit-for-bit consistency between the workflow YAML and the script.
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: jedwards1230/claude-plugin-actions
           ref: ${{ github.job_workflow_sha }}

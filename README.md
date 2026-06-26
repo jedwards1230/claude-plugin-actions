@@ -85,7 +85,7 @@ Real-world consumers of this workflow:
 
 ## Contributing
 
-PRs welcome. Releases are opt-in via a `semver:patch`, `semver:minor`, or `semver:major` label on the merged PR — see [`.github/workflows/release.yml`](.github/workflows/release.yml).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites, the lint/smoke-test workflow, and the PR & release process.
 
 ## License
 

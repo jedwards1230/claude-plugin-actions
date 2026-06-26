@@ -1,5 +1,7 @@
 # claude-plugin-actions
 
+@CONTRIBUTING.md
+
 Reusable GitHub Actions workflows for Claude Code plugin marketplaces. Consumers pin a `@v0` (or tighter) ref in their marketplace repos to run version hygiene checks without copying scripts.
 
 ## Repository Structure
@@ -82,10 +84,3 @@ Current pinned versions (update these when Dependabot bumps them):
 - `actions/checkout@v6`
 - `softprops/action-gh-release@v3`
 - `ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38` (SHA-pinned)
-
-## Contributing
-
-1. Make changes in a PR branch.
-2. CI must pass (shellcheck + smoke test).
-3. Add `semver:patch`, `semver:minor`, or `semver:major` label to the PR to trigger a release on merge.
-4. Changes to `check-plugin-versions.sh` are the consumer contract — update the smoke test in `ci.yml` for new behaviors.
